@@ -301,6 +301,7 @@ HR Team`;
     };
 
     const handleGenerateOffer = (employee) => {
+        setProcessing(true);
         try {
             const doc = new jsPDF();
 
@@ -322,13 +323,15 @@ Subject: Offer of Employment - {{Role}}
 
 Dear {{Name}},
 
-We are pleased to offer you the position of {{Role}} at {{CompanyName}}.
+We are pleased to offer you the position of {{Role}} at {{CompanyName}}. We were impressed with your qualifications and believe you will be a valuable asset to our team.
 
 **Position Details:**
 - Designation: {{Role}}
 - Employment Type: {{Type}}
 - Start Date: {{StartDate}}
 - CTC (Annual): {{Salary}} ({{AmountInWords}})
+
+You will be expected to carry out the duties and responsibilities as described in the job description.
 
 We look forward to welcoming you to {{CompanyName}}.
 
@@ -361,18 +364,22 @@ Authorized Signatory
             let finalContent = template;
             Object.keys(replacements).forEach(key => {
                 const val = replacements[key];
-                // Global replace
-                const regex = new RegExp(key, 'g');
+                const regex = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
                 finalContent = finalContent.replace(regex, val);
             });
 
             // 4. Generate PDF
 
-            // Add Logo if exists
+            // Add Logo with format detection
             if (logoBase64) {
                 try {
-                    doc.addImage(logoBase64, 'PNG', 15, 10, 30, 30, undefined, 'FAST');
-                } catch (e) { console.error("Logo error", e); }
+                    const format = logoBase64.split(';')[0].split('/')[1].toUpperCase();
+                    doc.addImage(logoBase64, format === 'SVG+XML' ? 'PNG' : format, 15, 10, 30, 30, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Logo error", e);
+                    // Fallback to PNG if detection fails
+                    try { doc.addImage(logoBase64, 'PNG', 15, 10, 30, 30, undefined, 'FAST'); } catch (e2) { }
+                }
             }
 
             // Header - Date
@@ -387,12 +394,87 @@ Authorized Signatory
             doc.line(70, 67, 140, 67);
 
             // Body Content
-            doc.setFontSize(12);
+            doc.setFontSize(11);
             doc.setFont("helvetica", "normal");
 
-            // Text Wrapping
-            const splitText = doc.splitTextToSize(finalContent, 170);
-            doc.text(splitText, 20, 80);
+            const pageHeight = doc.internal.pageSize.height;
+            const margin = 20;
+            const lineHeight = 7;
+            let cursorY = 80;
+
+            // Simple Markdown Parser & Renderer with Text Wrapping
+            const lines = finalContent.split('\n');
+            const maxWidth = 170;
+            const startX = 20;
+
+            lines.forEach(originalLine => {
+                let line = originalLine;
+                
+                // Extra spacing for paragraphs
+                if (line.trim() === '') {
+                    cursorY += lineHeight;
+                    return;
+                }
+
+                let indent = 0;
+                // Handle Bullets
+                if (line.trim().startsWith('- ')) {
+                    line = '• ' + line.trim().substring(2);
+                    indent = 5;
+                }
+
+                const parts = line.split(/(\*\*.*?\*\*)/g);
+                let cursorX = startX + indent;
+
+                // Word-level text wrapping for mixed styles
+                parts.forEach(part => {
+                    if (!part) return;
+
+                    let isBold = false;
+                    let text = part;
+                    if (part.startsWith('**') && part.endsWith('**')) {
+                        isBold = true;
+                        text = part.substring(2, part.length - 2);
+                    }
+
+                    doc.setFont("helvetica", isBold ? "bold" : "normal");
+
+                    // Split by spaces but preserve them to calculate correct width
+                    const words = text.match(/(\S+|\s+)/g) || [];
+
+                    words.forEach(word => {
+                        const wordWidth = doc.getTextWidth(word);
+                        
+                        // If word exceeds max width, wrap to next line
+                        // Ignore wrapping if it's just a space at the end of the line
+                        if (word.trim() !== '' && cursorX + wordWidth > startX + maxWidth) {
+                            cursorY += lineHeight;
+                            cursorX = startX + indent;
+                            
+                            if (cursorY > pageHeight - margin) {
+                                doc.addPage();
+                                cursorY = margin;
+                            }
+                        }
+
+                        // Don't render spaces if it's at the very beginning of a new line
+                        if (cursorX === startX + indent && word.trim() === '') {
+                            return;
+                        }
+
+                        doc.text(word, cursorX, cursorY);
+                        cursorX += wordWidth;
+                    });
+                });
+
+                cursorY += lineHeight;
+
+                // Page break check after a line
+                if (cursorY > pageHeight - margin) {
+                    doc.addPage();
+                    cursorY = margin;
+                }
+            });
 
             // Save
             const safeName = (employee.Name || 'Employee').replace(/ /g, '_');
@@ -501,7 +583,7 @@ Authorized Signatory
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             {isOffer ? (
                                                 <button
-                                                    onClick={() => handleGenerateOffer(employee.ID)}
+                                                    onClick={() => handleGenerateOffer(employee)}
                                                     disabled={processing}
                                                     className="text-indigo-600 hover:text-indigo-900 flex items-center justify-end w-full"
                                                 >

@@ -139,14 +139,19 @@ export const DatabaseService = {
 
   getSetting(key) {
     if (!db) return null;
-    const stmt = db.prepare("SELECT value FROM settings WHERE key = ?");
-    stmt.bind([key]);
-    let result = null;
-    if (stmt.step()) {
-      result = stmt.getAsObject().value;
+    try {
+      const stmt = db.prepare("SELECT value FROM settings WHERE key = ?");
+      stmt.bind([key]);
+      let result = null;
+      if (stmt.step()) {
+        result = stmt.getAsObject().value;
+      }
+      stmt.free();
+      return result;
+    } catch (e) {
+      console.warn(`Error getting setting ${key}:`, e);
+      return null;
     }
-    stmt.free();
-    return result;
   },
 
   saveSetting(key, value) {
